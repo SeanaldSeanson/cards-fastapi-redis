@@ -1,8 +1,13 @@
+import secrets, time
+import redis, hiredis
 from fastapi import FastAPI
 from pydantic import BaseModel
-import redis
 from app.cards_helpers import *
-import secrets, time
+from enum import IntEnum
+
+class SortBy(IntEnum):
+    NAME = 0
+    DATE = 1
 
 class GameCreationInfo(BaseModel):
     player_name: str = None
@@ -19,12 +24,12 @@ r = redis.Redis(host="localhost", port=6379, db=0, health_check_interval=30,
         decode_responses=True)
 
 z_add_unique = ""
-with open("redis/z_add_unique.lua") as script_file:
+with open("app/redis/z_add_unique.lua") as script_file:
     z_add_unique = r.register_script(script_file.read())
     script_file.close()
 
-async def zAddUnique(key: str, nbytes: int = 4, score: float = time.time()):
-    return z_add_unique(keys=[key], args=[nbytes, score])
+async def zaddUnique(key: str, nbytes: int = 4, score: float = time.time()):
+    return z_add_unique(keys=[key], args=[nbytes, score, secrets.randbits(32)])
 
 def mergeDict(x: dict, y: dict):
     x.update(y)
@@ -36,25 +41,10 @@ async def hUpdate(h, data: dict):
         pipe.hset(h, dkey, data[key])
     pipe.execute()
 
-async def laddID(id_list: str, nbytes: int):
-    while r.get(id_list + ":lock"):
-        pass
-    existing_ids = r.lrange(id_list, 0, -1)
-    new_id = secrets.token_hex(nbytes)
-    while new_id in existing_ids:
-        new_id = secrets.token_hex(nbytes)
-    return new_id
-
-async def saddID
-
-async def zaddID(id_set: str, nbytes:int):
-    existing_ids = r.zrange(id_list, 
-
 async def makePlayer(game_id: str, name: str = ""):
     pipe = r.pipeline()
-    player_id = saddID("players", 8)
-    pipe.lpush("player", player_id)
-    player_hash = "player:" + player_id
+    player_id = zaddUnique("players")
+    player_hash = "player_" + player_id
     pipe.hset(player_hash, "game_id", game_id)
 
     secret = secrets.token_urlsafe(256)
@@ -68,10 +58,9 @@ async def makeGame(data: dict):
     pipe = r.pipeline()
 
     # Generate a unique game_id
-    game_id = zaddID("game", 4)
+    game_id = zaddUnique("games", 4)
 
-    pipe.zadd("game", game_id, time.time())
-    game_hash = "game:" + game_id
+    game_hash = "game_" + game_id
 
     # Pop player_name from data and use it to create a player entry, then
     # replace it with the new player's player_id.
@@ -95,8 +84,19 @@ async def hello():
     return {"message": "Hello World"}
 
 @app.get("/games")
-async def listGames(skip: int = 0, limit: int = 10):
+async def listGames(
+        sortby: SortBy = SortBy.DATE,
+        reverse: bool = False,
+        start: int = 0, end: int = -1):
 
+    if sortby == SortBy.DATE:
+        if reverse:
+            return r.zrange("games", start, end, withscores=True)
+        return r.zrevrange("games", start, end, withscores=True)
+    elif sortby == SortBy.NAME:
+        if reverse:
+            return r.zrevrangebylex("games", start, end, withscores=True)
+        return r.zrangebylex("games", start, end, withscores=True)
 
 @app.post("/create")
 async def createGame(body: GameCreationInfo):

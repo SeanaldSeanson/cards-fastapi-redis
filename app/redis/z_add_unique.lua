@@ -1,7 +1,8 @@
-math.randomseed()
 local z_key = KEYS[1]
 local nbytes = ARGV[1]
 local score = ARGV[2]
+local seed = ARGV[3]
+math.randomseed(seed)
 local generate = function()
     local strings = {}
     for i=0, nbytes do
